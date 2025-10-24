@@ -60,5 +60,5 @@ Amazon Bot هو نظام متكامل يسمح للمستخدمين بالبحث
 
 1. **استنساخ المشروع**
 ```bash
-git clone https://github.com/your-username/amazon-bot.git
+git clone https://github.com/achraf-mehloul/amazon-bot.git
 cd amazon-bot
