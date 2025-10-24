@@ -1,0 +1,24 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "Amazon Bot Monitoring",
+    "tags": ["amazon", "bot", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "إحصائيات النظام",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(users_total)",
+            "legendFormat": "إجمالي المستخدمين"
+          }
+        ]
+      }
+    ],
+    "time": {"from": "now-6h", "to": "now"},
+    "refresh": "30s"
+  }
+}

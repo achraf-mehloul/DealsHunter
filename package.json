@@ -1,0 +1,19 @@
+{
+  "name": "amazon-bot",
+  "version": "1.0.0",
+  "description": "Amazon Product Search Telegram Bot with Admin Dashboard",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:dashboard\"",
+    "dev:api": "cd api-gateway && python -m uvicorn app:app --reload --host 0.0.0.0 --port 8000",
+    "dev:dashboard": "cd admin-dashboard && npm run dev",
+    "build": "npm run build:dashboard",
+    "build:dashboard": "cd admin-dashboard && npm run build",
+    "start": "docker-compose up -d",
+    "stop": "docker-compose down",
+    "logs": "docker-compose logs -f",
+    "clean": "docker system prune -af && docker volume prune -f"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
