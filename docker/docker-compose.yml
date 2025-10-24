@@ -1,0 +1,197 @@
+version: '3.8'
+
+services:
+  # قاعدة البيانات PostgreSQL
+  postgres:
+    image: postgres:15
+    container_name: amazon_bot_postgres
+    environment:
+      POSTGRES_DB: amazon_bot
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-admin123}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432"
+    networks:
+      - amazon_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d amazon_bot"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis للتخزين المؤقت
+  redis:
+    image: redis:7-alpine
+    container_name: amazon_bot_redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis123}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - amazon_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # بوت تليجرام
+  telegram-bot:
+    build:
+      context: ../telegram-bot
+      dockerfile: Dockerfile
+    container_name: amazon_telegram_bot
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_ASSOCIATE_TAG=${AWS_ASSOCIATE_TAG}
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-admin123}@postgres:5432/amazon_bot
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ./logs/telegram-bot:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - amazon_network
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=false"
+
+  # بوابة API
+  api-gateway:
+    build:
+      context: ../api-gateway
+      dockerfile: Dockerfile
+    container_name: amazon_api_gateway
+    environment:
+      - DATABASE_URL=postgresql://admin:${DB_PASSWORD:-admin123}@postgres:5432/amazon_bot
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis123}@redis:6379/0
+      - DEBUG=${DEBUG:-false}
+      - HOST=0.0.0.0
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs/api-gateway:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - amazon_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # لوحة التحكم الإدارية
+  admin-dashboard:
+    build:
+      context: ../admin-dashboard
+      dockerfile: Dockerfile
+    container_name: amazon_admin_dashboard
+    environment:
+      - VITE_API_URL=http://localhost:8000/api
+      - VITE_WS_URL=ws://localhost:8000/ws
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs/admin-dashboard:/app/logs
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - amazon_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Nginx كموازن حمل
+  nginx:
+    image: nginx:alpine
+    container_name: amazon_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - api-gateway
+      - admin-dashboard
+    networks:
+      - amazon_network
+    restart: unless-stopped
+
+  # Prometheus للمراقبة
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: amazon_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    networks:
+      - amazon_network
+    restart: unless-stopped
+
+  # Grafana للوحات التحكم
+  grafana:
+    image: grafana/grafana:latest
+    container_name: amazon_grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/dashboard.json
+    depends_on:
+      - prometheus
+    networks:
+      - amazon_network
+    restart: unless-stopped
+
+networks:
+  amazon_network:
+    driver: bridge
+    name: amazon_bot_network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
